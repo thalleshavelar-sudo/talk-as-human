@@ -1,0 +1,38 @@
+{
+  "name": "talk-as-human",
+  "version": "2.1.0",
+  "description": "Claude skill that makes text sound like a person wrote it: AI-tell filters for English, Portuguese and Spanish, length budgets, a voice profile and a checker.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent-skill",
+    "skill",
+    "writing",
+    "ai-detection",
+    "humanize",
+    "llm"
+  ],
+  "license": "MIT",
+  "author": "thalleshavelar-sudo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thalleshavelar-sudo/talk-as-human.git"
+  },
+  "homepage": "https://github.com/thalleshavelar-sudo/talk-as-human#readme",
+  "bugs": "https://github.com/thalleshavelar-sudo/talk-as-human/issues",
+  "bin": {
+    "talk-as-human": "bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "SKILL.md",
+    "references/",
+    "scripts/",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=16.7"
+  }
+}

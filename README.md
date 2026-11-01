@@ -2,20 +2,21 @@
 
 A skill for Claude that writes and rewrites text so it sounds like a person wrote it. It works in English, Portuguese and Spanish, and it runs anywhere that reads a `SKILL.md`: Claude Code, Claude.ai, or another agent you point at the file.
 
-You give it a draft, or ask it to write something, and it strips out the habits that make text read as generated: the "it's not X, it's Y" contrasts, the punchline after every paragraph, dashes everywhere, "delve" and "leverage", "Great question!", bold labels on every bullet. It won't invent facts to fill the gaps. If a sentence needs a number it doesn't have, it asks.
+You give it a draft, or ask it to write something, and it strips out the habits that make text read as generated: the "it's not X, it's Y" contrasts, the punchline after every paragraph, dashes everywhere, "delve" and "leverage", "Great question!", bold labels on every bullet, and the 250-word status update that should have been 80. It won't invent facts to fill the gaps. If a sentence needs a number it doesn't have, it asks.
 
 ## What's inside
 
 ```
-SKILL.md                           the process and the 38 filters
+SKILL.md                           the process and the 42 filters
 references/filters-en.md           English word and phrase lists, with plain replacements
 references/filters-pt-br.md        same for Brazilian Portuguese
 references/filters-es.md           same for Spanish
 references/natural-voice-filter.md voice profile to imitate, per channel
 scripts/check_ai_tells.py          automatic checker, no dependencies
+bin/cli.js                         npx installer
 ```
 
-The filters come in seven groups:
+The filters come in eight groups:
 
 | Group | Examples |
 |---|---|
@@ -26,6 +27,7 @@ The filters come in seven groups:
 | Leftovers | "I hope this helps", "Want me to...?", knowledge-cutoff disclaimers, `oaicite`, `turn0search0`, zero-width characters, `[Name]` placeholders |
 | Wrong reader | re-explaining what the reader already knows, the answer buried in the last line, the wrong register for the channel |
 | Overcorrection | cutting real warmth, flattening the genre, fake-casual punctuation, restating numbers, evenly balanced shapes, planted details |
+| Length and density | a word budget per channel, data-dump paragraphs, breakdowns next to totals, narrating the process, status buried at the end |
 
 Each language file has its own local habits, like "vale ressaltar" and "vou estar enviando" in Portuguese or "cabe destacar" in Spanish.
 
@@ -33,16 +35,25 @@ The overcorrection group is there because rewrites that only delete things come 
 
 ## Install
 
-Claude Code, for every project:
+With npx (Node 16.7 or newer):
+
+```bash
+npx talk-as-human              # every project: ~/.claude/skills/talk-as-human
+npx talk-as-human --project    # this project only: ./.claude/skills/talk-as-human
+npx talk-as-human --dir <path> # another agent's skills folder
+npx talk-as-human uninstall    # add --project or --dir to match how you installed
+```
+
+With the skills CLI, which also targets Cursor, Copilot and other agents:
+
+```bash
+npx skills add thalleshavelar-sudo/talk-as-human
+```
+
+With git:
 
 ```bash
 git clone https://github.com/thalleshavelar-sudo/talk-as-human.git ~/.claude/skills/talk-as-human
-```
-
-One project only:
-
-```bash
-git clone https://github.com/thalleshavelar-sudo/talk-as-human.git .claude/skills/talk-as-human
 ```
 
 Claude.ai: zip the folder and upload it in the Skills section of your settings.
@@ -63,7 +74,11 @@ The checker also works by itself:
 python3 scripts/check_ai_tells.py draft.md
 echo "Great question! It's worth noting that..." | python3 scripts/check_ai_tells.py -
 python3 scripts/check_ai_tells.py --strict --min 3 post.txt   # exits 1 on strong findings, handy in CI
+python3 scripts/check_ai_tells.py --channel work update.txt    # also checks the length budget
+npx talk-as-human check --channel email reply.txt             # same checker through npx (needs Python 3)
 ```
+
+Channels and their word budgets: `chat` 40, `work` 90, `email` 150, `commit` 120, `post` 150, `review` 80, `doc` (paragraph length only).
 
 Sample output:
 

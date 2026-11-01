@@ -314,7 +314,13 @@ def sentences(prose):
     return [p.strip() for p in parts if re.search(r"\w", p)]
 
 
-def check(raw):
+BUDGETS = {  # max words per channel (filter 39)
+    "chat": 40, "work": 90, "email": 150, "commit": 120, "post": 150, "review": 80, "doc": None,
+}
+NUMBER = re.compile(r"(?<![\w.])\d[\d.,/:-]*\d?%?(?![\w])|\b[A-Z]{2,}\d+[A-Z\d]*\b|\b\d+[A-Z]{2,}[A-Z\d]*\b")
+
+
+def check(raw, channel=None):
     hits = []  # (line, weight, category, snippet)
     text = strip_code(raw)
 
@@ -382,6 +388,32 @@ def check(raw):
                 hits.append((0, 2, "repeated openings", f"3 paragraphs in a row start with '{firsts[j]}'"))
                 break
 
+    # length and density (section H)
+    budget = BUDGETS.get(channel) if channel else None
+    if budget and words > budget:
+        w = 3 if words > budget * 1.5 else 2
+        hits.append((0, w, "over length budget", f"{words} words for '{channel}' (budget {budget}); compress"))
+    for p in re.split(r"\n\s*\n", prose):
+        n_words = len(p.split())
+        if n_words == 0 or p.lstrip().startswith("#"):
+            continue
+        first = line_of(prose, prose.find(p.strip()[:40])) if p.strip() else 0
+        if n_words > 120:
+            hits.append((first, 2, "wall of text", f"paragraph of {n_words} words"))
+        elif n_words > 80:
+            hits.append((first, 1, "long paragraph", f"paragraph of {n_words} words"))
+        nums = len(NUMBER.findall(p))
+        if nums >= 8 and nums / max(n_words, 1) > 0.06:
+            hits.append((first, 2, "data dump", f"{nums} numbers/codes in {n_words} words; keep one per claim"))
+        parens = p.count("(")
+        if parens >= 3 and n_words < 150:
+            hits.append((first, 1, "parenthesis pile-up", f"{parens} parentheses in one paragraph"))
+        if re.search(r"\(\s*[\d.,]+[^)]*\b(e|y|and)\b[^)]*[\d.,]+[^)]*\)", p):
+            hits.append((first, 2, "breakdown next to total", "drop the split, keep the total"))
+    if channel in ("chat", "work", "email") and re.search(r"^\s*(#+\s*)?(o que fizemos|what we did|lo que hicimos|contexto|context|background|resumo|summary|resumen)\s*:?\s*$", text, flags=re.I | re.M):
+        hits.append((0, 2, "heading inside a message", "cut headings from short messages"))
+    stats["paragraphs"] = len([p for p in re.split(r"\n\s*\n", prose) if p.strip()])
+
     excl = text.count("!")
     if len(lens) >= 4 and excl >= 3 and excl / len(lens) > 0.4:
         hits.append((0, 2, "synthetic enthusiasm", f"{excl} exclamation marks in {len(lens)} sentences"))
@@ -405,12 +437,13 @@ def main():
     ap = argparse.ArgumentParser(description="Find AI writing tells (EN, PT-BR, ES).")
     ap.add_argument("file", help="path to a file, or - to read stdin")
     ap.add_argument("--strict", action="store_true", help="exit with code 1 if there is a strong finding")
+    ap.add_argument("--channel", choices=sorted(BUDGETS), help="check length against the channel budget")
     ap.add_argument("--min", type=int, default=1, choices=[1, 2, 3], help="minimum weight to show")
     a = ap.parse_args()
 
     raw = sys.stdin.read() if a.file == "-" else open(a.file, encoding="utf-8").read()
     raw = unicodedata.normalize("NFC", raw)
-    hits, stats = check(raw)
+    hits, stats = check(raw, a.channel)
     label = {3: "STRONG", 2: "medium", 1: "weak"}
 
     shown = [h for h in hits if h[1] >= a.min]
