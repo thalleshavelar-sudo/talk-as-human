@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""slop_check: acha vícios de texto de IA em português e inglês.
+"""check_ai_tells: finds AI writing tells in English, Portuguese and Spanish text.
 
-Uso:
-    python3 scripts/slop_check.py arquivo.md
-    echo "texto" | python3 scripts/slop_check.py -
-    python3 scripts/slop_check.py --strict arquivo.txt   # sai com código 1 se achar algo forte
+Usage:
+    python3 scripts/check_ai_tells.py draft.md
+    echo "some text" | python3 scripts/check_ai_tells.py -
+    python3 scripts/check_ai_tells.py --strict --min 3 post.txt   # exit 1 on strong findings
 
-Só usa a biblioteca padrão. Ignora blocos de código (```), código inline (`...`) e URLs.
-Ele acha palavras e formas. Encenação, leitor errado e fato inventado continuam
-sendo trabalho de leitura.
+Standard library only. Skips fenced code, inline code and URLs.
+It finds words and shapes. Staging, the wrong reader and invented facts still
+need a human (or model) to read the text.
 """
 
 import argparse
@@ -17,9 +17,9 @@ import statistics
 import sys
 import unicodedata
 
-# (categoria, peso, padrões). peso 3 = forte, 2 = médio, 1 = fraco sozinho.
+# (category, weight, patterns). weight 3 = strong, 2 = medium, 1 = weak alone.
 LISTS = [
-    ("resíduo de chat", 3, [
+    ("chat residue", 3, [
         r"[óo]tima pergunta", r"excelente pergunta", r"que pergunta interessante",
         r"espero (ter ajudado|que (isso )?(ajude|seja [úu]til))", r"fico [àa] disposi[çc][ãa]o",
         r"estou [àa] disposi[çc][ãa]o", r"qualquer d[úu]vida ([ée] s[óo] chamar|estou aqui)",
@@ -32,21 +32,44 @@ LISTS = [
         r"let me know if", r"feel free to", r"would you like me to", r"want me to\b",
         r"as an ai\b", r"as a (large )?language model", r"you'?re absolutely right",
         r"^\s*(certainly|of course|absolutely|sure thing)!", r"happy to help",
+        # es
+        r'[¡]?(excelente|buena|gran) pregunta',
+        r'espero (que (esto )?te (sirva|ayude)|haberte ayudado)',
+        r'no dudes en (contactar|preguntar|escribir)',
+        r'si necesitas algo m[áa]s',
+        r'¿(quieres|te gustar[íi]a) que',
+        r'como (una )?ia\b',
+        r'como (un )?modelo de lenguaje',
+        r'tienes toda la raz[óo]n',
+        r'aqu[íi] tienes',
+        r'a continuaci[óo]n te (presento|dejo|muestro)',
+        r'^\s*¡(claro|por supuesto|desde luego|perfecto|entendido)!',
+        r'quedo a (tu|su) disposici[óo]n',
     ]),
-    ("limite de conhecimento", 3, [
+    ("knowledge-limit disclaimer", 3, [
         r"at[ée] a data do meu treinamento", r"com base nas informa[çc][õo]es dispon[íi]veis",
         r"n[ãa]o h[áa] informa[çc][õo]es p[úu]blicas", r"n[ãa]o foi poss[íi]vel (encontrar|localizar)",
         r"n[ãa]o est[áa] amplamente documentad", r"as of my (last|knowledge) (update|cutoff)",
         r"based on (the )?available information", r"not (widely|publicly) (documented|available)",
+        # es
+        r'hasta la fecha de mi (entrenamiento|corte)',
+        r'seg[úu]n la informaci[óo]n disponible',
+        r'no (se encontr[óo]|hay) informaci[óo]n (p[úu]blica|disponible)',
+        r'no est[áa] ampliamente documentad',
     ]),
-    ("contraste encenado (não é X, é Y)", 3, [
+    ("staged contrast (not X, but Y)", 3, [
         r"n[ãa]o [ée] (s[óo]|apenas|somente|sobre)\b[^.!?\n]{1,80}[,.;]\s*[ée]\b",
         r"n[ãa]o se trata de\b[^.!?\n]{1,80}\bmas\b", r"mais do que\b[^.!?\n]{1,60},\s*[ée]\b",
         r"isso n[ãa]o significa\b[^.!?\n]{1,80}[.]\s*significa", r"n[ãa]o [ée] s[óo]\b",
         r"\bnot (just|only|merely)\b[^.!?\n]{1,80}\bbut\b", r"\bit'?s not\b[^.!?\n]{1,60}[,;.]\s*it'?s\b",
         r"this isn'?t about\b", r"\bisn'?t just\b",
+        # es
+        r'no es (solo|s[óo]lo|solamente|simplemente)\b[^.!?\n]{1,80}[,.;]\s*es\b',
+        r'no se trata de\b[^.!?\n]{1,80}\b(sino|se trata)\b',
+        r'm[áa]s que\b[^.!?\n]{1,60},\s*es\b',
+        r'esto no significa\b[^.!?\n]{1,80}[.]\s*significa',
     ]),
-    ("aquecimento / gancho", 3, [
+    ("run-up / hook", 3, [
         r"sem mais delongas", r"vamos mergulhar", r"vamos explorar", r"vamos destrinchar",
         r"senta que l[áa] vem", r"vem comigo", r"aqui est[áa] o que voc[êe] precisa saber",
         r"voc[êe] j[áa] parou (pra|para) pensar", r"j[áa] se perguntou", r"imagine um mundo",
@@ -56,16 +79,43 @@ LISTS = [
         r"here'?s what you need to know", r"without further ado", r"imagine a world",
         r"have you ever wondered", r"^\s*honestly\?", r"^\s*real talk", r"picture this",
         r"\bwhether you'?re an? \b",
+        # es
+        r'sin m[áa]s (pre[áa]mbulos|dilaci[óo]n)',
+        r'vamos a (sumergirnos|adentrarnos|explorar|desglosar)',
+        r'manos a la obra',
+        r'¿alguna vez te has preguntado',
+        r'¿te has parado a pensar',
+        r'imagina un mundo',
+        r'¿y si te dijera',
+        r'nadie habla de esto',
+        r'¿el resultado\?',
+        r'¿lo mejor\?',
+        r'¿adivinas qu[ée]\?',
+        r'la verdad es que',
+        r'lo cierto es que',
+        r'seamos honestos',
     ]),
-    ("fecho de efeito", 2, [
+    ("punchline closer", 2, [
         r"e isso muda tudo", r"simples assim\.", r"pensa nisso\.", r"leia de novo",
         r"fica a (reflex[ãa]o|li[çc][ãa]o|dica)", r"moral da hist[óo]ria", r"o futuro [ée] promissor",
         r"o c[ée]u [ée] o limite", r"(isso )?[ée] s[óo] o come[çc]o", r"a jornada continua",
         r"e [ée] a[íi] que (mora|est[áa]) o segredo", r"o recado [ée] claro",
         r"that'?s the real win", r"let that sink in", r"read that again", r"and that changes everything",
         r"the future looks bright", r"exciting times ahead", r"a step in the right direction",
+        # es
+        r'y eso lo cambia todo',
+        r'as[íi] de (simple|f[áa]cil)\.',
+        r'pi[ée]nsalo\.',
+        r'l[ée]elo otra vez',
+        r'ah[íi] est[áa] la clave',
+        r'te dejo la reflexi[óo]n',
+        r'el futuro es prometedor',
+        r'el cielo es el l[íi]mite',
+        r'(esto )?es solo el comienzo',
+        r'el viaje contin[úu]a',
+        r'moraleja:',
     ]),
-    ("conectivo de redação", 2, [
+    ("essay connector / filler opener", 2, [
         r"\bademais\b", r"\boutrossim\b", r"nesse sentido", r"nesse contexto", r"nesse cen[áa]rio",
         r"diante do exposto", r"por conseguinte", r"vale (ressaltar|destacar|lembrar|mencionar)",
         r"[ée] (importante|v[áa]lido|fundamental) (destacar|ressaltar|salientar|mencionar|notar|lembrar)",
@@ -77,8 +127,28 @@ LISTS = [
         r"it'?s (important|worth) (to note|noting)", r"it should be noted", r"in today'?s\b",
         r"in the (realm|landscape) of", r"at its core", r"in essence", r"to put it simply",
         r"when it comes to", r"at the end of the day", r"in conclusion", r"all things considered",
+        # es
+        r'\basimismo\b',
+        r'\bpor ende\b',
+        r'en este sentido',
+        r'en este contexto',
+        r'cabe (destacar|se[ñn]alar|mencionar|resaltar)',
+        r'es (importante|fundamental|crucial) (destacar|se[ñn]alar|resaltar|mencionar|recordar)',
+        r'vale la pena (mencionar|destacar)',
+        r'conviene recordar',
+        r'en s[íi]ntesis',
+        r'en definitiva',
+        r'por [úu]ltimo,? pero no menos importante',
+        r'en [úu]ltima instancia',
+        r'cuando se trata de',
+        r'en el mundo (actual|de hoy)',
+        r'hoy en d[íi]a',
+        r'en la era digital',
+        r'en un mundo cada vez m[áa]s',
+        r'en el panorama actual',
+        r'en un entorno en constante',
     ]),
-    ("palavra de IA", 2, [
+    ("AI vocabulary", 2, [
         r"\bmergulh(ar|e|amos|ando) (no|na|nos|nas|em)\b", r"\bdesvend", r"\balavanc", r"\bpotencializ",
         r"\bimpulsion", r"\bcatalis", r"\bfoment", r"\botimiz", r"\bdesbloque", r"\brevolucion",
         r"\bressignific", r"\bredefin", r"\bnaveg(ar|ando) (por|pelos|pelas|os|as)\b", r"\bempoder",
@@ -95,8 +165,36 @@ LISTS = [
         r"\blandscape\b", r"\brealm\b", r"\btapestry\b", r"\btestament\b", r"\bbeacon\b",
         r"\bmeticulous", r"\bparamount\b", r"\bmyriad\b", r"\bplethora\b", r"\bshed light on",
         r"\bpave the way", r"\bindelible\b", r"\bunwavering\b", r"\bgarner",
+        # es
+        r'\badentr(arse|arnos|ndonos)\b',
+        r'\bsumerg(irse|irnos|ámonos)\b',
+        r'\bdesentra[ñn]',
+        r'\bpotenci(ar|a|ando)\b',
+        r'\bcatapult',
+        r'\bapalanc',
+        r'\bpropici',
+        r'\bdesbloque',
+        r'\bempoder',
+        r'\baportar valor\b',
+        r'\bintegral\b',
+        r'\bexhaustiv',
+        r'\bimprescindible',
+        r'\bvanguardi',
+        r'\bmultifac[ée]tic',
+        r'\bpolifac[ée]tic',
+        r'\bescenario\b',
+        r'\bpaisaje\b',
+        r'\becosistema\b',
+        r'\btraves[íi]a\b',
+        r'\btapiz\b',
+        r'\bfaro\b',
+        r'\bpiedra angular',
+        r'\bun antes y un despu[ée]s',
+        r'\bpunto de inflexi[óo]n',
+        r'\bsinergi',
+        r'\bresiliencia\b',
     ]),
-    ("inflação / folder", 2, [
+    ("inflation / brochure language", 2, [
         r"papel (fundamental|crucial|essencial|importante)", r"marco (importante|hist[óo]rico)",
         r"momento decisivo", r"legado duradouro", r"deixou sua marca", r"abrindo caminho para",
         r"de tirar o f[ôo]lego", r"no cora[çc][ãa]o d[aoe]", r"experi[êe]ncia [úu]nica",
@@ -104,35 +202,82 @@ LISTS = [
         r"stands as a", r"serves as a testament", r"plays? a (key|crucial|pivotal|vital) role",
         r"enduring legacy", r"setting the stage", r"nestled", r"in the heart of", r"breathtaking",
         r"\bstunning\b", r"must-visit", r"state-of-the-art", r"world-class", r"watershed moment",
+        # es
+        r'(juega|desempe[ñn]a) un papel (fundamental|crucial|clave|esencial)',
+        r'marca un hito',
+        r'legado duradero',
+        r'dej[óo] (su|una) huella',
+        r'allanando el camino',
+        r'que te dejar[áa] sin aliento',
+        r'en el coraz[óo]n de',
+        r'enclavad[oa] en',
+        r'experiencia (única|inolvidable)',
+        r'soluci[óo]n integral',
+        r'de primer nivel',
+        r'compromiso con',
+        r'se erige como',
+        r'se posiciona como',
     ]),
-    ("autoridade sem fonte", 2, [
+    ("unsourced authority", 2, [
         r"especialistas (afirmam|apontam|dizem|acreditam)", r"estudos (mostram|comprovam|indicam)",
         r"pesquisas (mostram|indicam|apontam)", r"segundo especialistas", r"[ée] amplamente reconhecido",
         r"a ci[êe]ncia comprova", r"experts (say|argue|believe)", r"studies (show|suggest)",
         r"research (shows|suggests)", r"it is widely (acknowledged|recognized)",
+        # es
+        r'los expertos (afirman|coinciden|dicen|creen)',
+        r'(diversos |los )?estudios (demuestran|indican|muestran)',
+        r'las investigaciones (indican|muestran)',
+        r'seg[úu]n los expertos',
+        r'es ampliamente reconocido',
+        r'la ciencia lo confirma',
     ]),
-    ("intensificador", 1, [
+    ("intensifier", 1, [
         r"\bextremamente\b", r"\bincrivelmente\b", r"\babsolutamente\b", r"\bverdadeiramente\b",
         r"\bprofundamente\b", r"\bsignificativamente\b", r"\bdrasticamente\b", r"\bextraordinariamente\b",
         r"\bnotavelmente\b", r"\bindiscutivelmente\b", r"\binegavelmente\b",
         r"\bextremely\b", r"\bincredibly\b", r"\btruly\b", r"\bsignificantly\b", r"\bdramatically\b",
         r"\bremarkably\b", r"\bundoubtedly\b", r"\bfundamentally\b",
+        # es
+        r'\bextremadamente\b',
+        r'\bincre[íi]blemente\b',
+        r'\bsumamente\b',
+        r'\bindudablemente\b',
+        r'\binnegablemente\b',
     ]),
-    ("ressalva empilhada", 1, [
+    ("stacked hedge", 1, [
         r"pode potencialmente", r"talvez possa", r"poderia potencialmente", r"de certa forma",
         r"at[ée] certo ponto", r"pode ajudar a", r"busca garantir", r"visa (proporcionar|garantir)",
         r"could potentially", r"may potentially", r"might arguably", r"can help (to )?ensure",
+        # es
+        r'podr[íi]a potencialmente',
+        r'de alguna manera',
+        r'hasta cierto punto',
+        r'busca garantizar',
+        r'puede ayudar a',
     ]),
-    ("gerundismo / burocratês", 1, [
+    ("padded verb / bureaucratese", 1, [
         r"\bvou estar \w+ndo\b", r"\bestaremos \w+ndo\b", r"\bvamos estar \w+ndo\b",
         r"\bfoi realizad[ao]\b", r"\b[ée] realizad[ao]\b", r"\ba n[íi]vel de\b", r"\bno que tange\b",
         r"\bse configura como\b", r"\bconta com\b", r"\bdisp[õo]e de\b",
         r"\bserves as\b", r"\bfunctions as\b", r"\bboasts\b",
+        # es
+        r'se procedi[óo] a',
+        r'se llev[óo] a cabo',
+        r'\ba nivel de\b',
+        r'\ben base a\b',
+        r'\ben aras de\b',
+        r'\bcuenta con\b',
+        r'\bdispone de\b',
+        r'\bponer en valor\b',
     ]),
-    ("texto falando de si", 1, [
+    ("text talking about itself", 1, [
         r"como (mencionado|dito|visto) (acima|anteriormente)", r"como veremos (a seguir|adiante)",
         r"neste (artigo|post|guia|texto) (voc[êe] vai|vamos)", r"este texto tem como objetivo",
         r"as (mentioned|discussed) above", r"in this (article|post|guide),? (we|you)",
+        # es
+        r'como se (mencion[óo]|dijo) (anteriormente|arriba)',
+        r'como veremos (a continuaci[óo]n|m[áa]s adelante)',
+        r'en este (art[íi]culo|post|texto) (veremos|vamos)',
     ]),
 ]
 
@@ -144,13 +289,13 @@ INVISIBLE = {
 }
 ARTIFACTS = [r"oaicite", r"contentReference", r"turn\d+(search|news|view)\d+", r"grok_card",
              r"attributableIndex", r"【[^】]*†[^】]*】", r"utm_source=(chatgpt\.com|openai)"]
-PLACEHOLDERS = [r"\[(nome|name|empresa|company|inserir[^\]]*|insert[^\]]*|seu nome|your name)\]",
+PLACEHOLDERS = [r"\[(nome|name|nombre|empresa|company|inserir[^\]]*|insert[^\]]*|insertar[^\]]*|seu nome|your name|tu nombre)\]",
                 r"\bXXX+\b", r"lorem ipsum", r"\{\{[^}]+\}\}"]
 EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿⭐✅❌✨]")
 
 
 def strip_code(text):
-    """Troca código e URLs por espaços, mantendo as quebras de linha (pra numeração bater)."""
+    """Blank out code and URLs but keep newlines so line numbers still match."""
     def blank(m):
         return re.sub(r"[^\n]", " ", m.group(0))
     text = re.sub(r"```.*?```", blank, text, flags=re.S)
@@ -166,29 +311,29 @@ def line_of(text, pos):
 def sentences(prose):
     prose = re.sub(r"^\s*([#>*-]|\d+\.)\s*", "", prose, flags=re.M)
     parts = re.split(r"(?<=[.!?])\s+|\n{2,}", prose)
-    return [p.strip() for p in parts if len(p.split()) >= 1 and re.search(r"\w", p)]
+    return [p.strip() for p in parts if re.search(r"\w", p)]
 
 
 def check(raw):
-    hits = []  # (linha, peso, categoria, trecho)
+    hits = []  # (line, weight, category, snippet)
     text = strip_code(raw)
 
     for ch, name in INVISIBLE.items():
         for m in re.finditer(re.escape(ch), raw):
-            hits.append((line_of(raw, m.start()), 3, "caractere invisível", name))
+            hits.append((line_of(raw, m.start()), 3, "invisible character", name))
     for pat in ARTIFACTS:
         for m in re.finditer(pat, raw):
-            hits.append((line_of(raw, m.start()), 3, "artefato de IA", m.group(0)))
+            hits.append((line_of(raw, m.start()), 3, "chatbot markup artifact", m.group(0)))
     for pat in PLACEHOLDERS:
         for m in re.finditer(pat, text, flags=re.I):
-            hits.append((line_of(text, m.start()), 3, "placeholder esquecido", m.group(0)))
+            hits.append((line_of(text, m.start()), 3, "forgotten placeholder", m.group(0)))
 
     for m in re.finditer(r"[—–]|\s--\s", text):
-        hits.append((line_of(text, m.start()), 3, "travessão", repr(m.group(0).strip())))
+        hits.append((line_of(text, m.start()), 3, "dash", repr(m.group(0).strip())))
     for m in re.finditer(r"[“”‘’]", text):
-        hits.append((line_of(text, m.start()), 1, "aspas curvas", m.group(0)))
+        hits.append((line_of(text, m.start()), 1, "curly quote", m.group(0)))
     for m in re.finditer(r"…", text):
-        hits.append((line_of(text, m.start()), 1, "reticências unicode", "…"))
+        hits.append((line_of(text, m.start()), 1, "unicode ellipsis", "…"))
 
     for cat, weight, pats in LISTS:
         for pat in pats:
@@ -198,58 +343,58 @@ def check(raw):
     for i, line in enumerate(text.split("\n"), 1):
         s = line.strip()
         if re.match(r"^#{1,6}\s", s):
-            words = [w for w in re.findall(r"[^\W\d_]+", s[1:].lstrip("# ")) if len(w) >= 2]
+            words = [w for w in re.findall(r"[^\W\d_]+", s.lstrip("# ")) if len(w) >= 2]
             if len(words) >= 3 and all(w[0].isupper() for w in words):
-                hits.append((i, 2, "título em Title Case", s))
+                hits.append((i, 2, "Title Case heading", s))
             if EMOJI.search(s):
-                hits.append((i, 2, "emoji em título", s))
+                hits.append((i, 2, "emoji in heading", s))
         if re.match(r"^([-*]|\d+\.)\s+\*\*[^*]+:\*\*|^([-*]|\d+\.)\s+\*\*[^*]+\*\*:", s):
-            hits.append((i, 2, "lista com rótulo em negrito", s[:60]))
+            hits.append((i, 2, "bold-label list item", s[:60]))
         if re.match(r"^([-*]|\d+\.)?\s*" + EMOJI.pattern, s):
-            hits.append((i, 1, "emoji como marcador", s[:60]))
+            hits.append((i, 1, "emoji bullet", s[:60]))
 
     stats = {}
-    prose = re.sub(r"^\s*\|.*$", "", text, flags=re.M)  # tira tabelas
-    sents = sentences(prose)
-    lens = [len(s.split()) for s in sents]
+    prose = re.sub(r"^\s*\|.*$", "", text, flags=re.M)  # drop tables
+    lens = [len(s.split()) for s in sentences(prose)]
     words = sum(lens)
-    stats["palavras"] = words
-    stats["frases"] = len(lens)
+    stats["words"] = words
+    stats["sentences"] = len(lens)
     if len(lens) >= 6:
-        stats["média de palavras por frase"] = round(statistics.mean(lens), 1)
-        stats["desvio padrão"] = round(statistics.pstdev(lens), 1)
-        stats["frases < 8 palavras"] = sum(1 for n in lens if n < 8)
-        stats["frases > 25 palavras"] = sum(1 for n in lens if n > 25)
+        stats["mean words/sentence"] = round(statistics.mean(lens), 1)
+        stats["std dev"] = round(statistics.pstdev(lens), 1)
+        stats["under 8 words"] = sum(1 for n in lens if n < 8)
+        stats["over 25 words"] = sum(1 for n in lens if n > 25)
         if words >= 150 and statistics.pstdev(lens) < 5:
-            hits.append((0, 2, "ritmo uniforme", "frases quase todas do mesmo tamanho; misture curtas e longas"))
-        if words >= 300 and (stats["frases < 8 palavras"] == 0 or stats["frases > 25 palavras"] == 0):
-            hits.append((0, 1, "pouca variação", "falta frase bem curta ou bem longa"))
+            hits.append((0, 2, "flat rhythm", "sentences are nearly all the same length; mix short and long"))
+        if words >= 300 and (stats["under 8 words"] == 0 or stats["over 25 words"] == 0):
+            hits.append((0, 1, "low variation", "no very short or no very long sentence"))
 
-    paras = [p for p in re.split(r"\n\s*\n", prose) if len(p.split()) >= 15 and not p.lstrip().startswith(("#", "-", "*", ">"))]
+    paras = [p for p in re.split(r"\n\s*\n", prose)
+             if len(p.split()) >= 15 and not p.lstrip().startswith(("#", "-", "*", ">"))]
     if len(paras) >= 4:
         plen = [len(p.split()) for p in paras]
         mean = statistics.mean(plen)
         if all(abs(n - mean) <= 0.15 * mean for n in plen):
-            hits.append((0, 2, "parágrafos do mesmo tamanho", f"{len(paras)} parágrafos com ~{round(mean)} palavras"))
+            hits.append((0, 2, "same-size paragraphs", f"{len(paras)} paragraphs of ~{round(mean)} words"))
         firsts = [p.split()[0].lower().strip(",.:") for p in paras]
         for j in range(len(firsts) - 2):
             if firsts[j] == firsts[j + 1] == firsts[j + 2]:
-                hits.append((0, 2, "aberturas repetidas", f"3 parágrafos seguidos começam com '{firsts[j]}'"))
+                hits.append((0, 2, "repeated openings", f"3 paragraphs in a row start with '{firsts[j]}'"))
                 break
 
     excl = text.count("!")
-    if len(lens) >= 4 and excl / max(len(lens), 1) > 0.3:
-        hits.append((0, 2, "entusiasmo sintético", f"{excl} exclamações em {len(lens)} frases"))
+    if len(lens) >= 4 and excl >= 3 and excl / len(lens) > 0.4:
+        hits.append((0, 2, "synthetic enthusiasm", f"{excl} exclamation marks in {len(lens)} sentences"))
     bold = len(re.findall(r"\*\*[^*\n]+\*\*", text))
-    if words and bold / max(words, 1) * 100 > 2:
-        hits.append((0, 1, "negrito demais", f"{bold} trechos em negrito em {words} palavras"))
+    if words and bold / words * 100 > 2:
+        hits.append((0, 1, "too much bold", f"{bold} bold spans in {words} words"))
     emojis = len(EMOJI.findall(text))
-    if words and emojis / max(words, 1) * 100 > 1:
-        hits.append((0, 1, "emoji demais", f"{emojis} emojis em {words} palavras"))
+    if words and emojis / words * 100 > 1:
+        hits.append((0, 1, "too many emoji", f"{emojis} emoji in {words} words"))
 
     hits.sort(key=lambda h: (h[0], -h[1], -len(h[3])))
     dedup = []
-    for h in hits:  # tira achado que é pedaço de outro na mesma linha e categoria
+    for h in hits:  # drop a hit that is part of another on the same line and category
         if any(d[0] == h[0] and d[2] == h[2] and h[3].lower() in d[3].lower() for d in dedup):
             continue
         dedup.append(h)
@@ -257,27 +402,27 @@ def check(raw):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Acha vícios de texto de IA (PT-BR e EN).")
-    ap.add_argument("arquivo", help="caminho do arquivo, ou - pra ler da entrada padrão")
-    ap.add_argument("--strict", action="store_true", help="sai com código 1 se houver achado forte")
-    ap.add_argument("--min", type=int, default=1, choices=[1, 2, 3], help="peso mínimo pra mostrar")
+    ap = argparse.ArgumentParser(description="Find AI writing tells (EN, PT-BR, ES).")
+    ap.add_argument("file", help="path to a file, or - to read stdin")
+    ap.add_argument("--strict", action="store_true", help="exit with code 1 if there is a strong finding")
+    ap.add_argument("--min", type=int, default=1, choices=[1, 2, 3], help="minimum weight to show")
     a = ap.parse_args()
 
-    raw = sys.stdin.read() if a.arquivo == "-" else open(a.arquivo, encoding="utf-8").read()
+    raw = sys.stdin.read() if a.file == "-" else open(a.file, encoding="utf-8").read()
     raw = unicodedata.normalize("NFC", raw)
     hits, stats = check(raw)
-    label = {3: "FORTE", 2: "médio", 1: "fraco"}
+    label = {3: "STRONG", 2: "medium", 1: "weak"}
 
     shown = [h for h in hits if h[1] >= a.min]
     for line, w, cat, snip in shown:
-        where = f"L{line}" if line else "texto"
-        print(f"[{label[w]:5}] {where:>6}  {cat}: {snip}")
+        where = f"L{line}" if line else "text"
+        print(f"[{label[w]:6}] {where:>5}  {cat}: {snip}")
     if not shown:
-        print("Nada encontrado. Agora leia em voz alta.")
+        print("Nothing found. Now read it out loud.")
     print()
     print("  ".join(f"{k}: {v}" for k, v in stats.items()))
     strong = sum(1 for h in hits if h[1] == 3)
-    print(f"achados: {len(hits)} (fortes: {strong})")
+    print(f"findings: {len(hits)} (strong: {strong})")
     if a.strict and strong:
         sys.exit(1)
 

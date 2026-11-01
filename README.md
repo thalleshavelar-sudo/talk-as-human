@@ -1,96 +1,88 @@
 # talk-as-human
 
-Skill pra Claude (Claude Code, Claude.ai e qualquer agente que lê `SKILL.md`) que escreve e reescreve texto pra soar como gente. Funciona em português e inglês e vem com o jeito de falar do Thalles embutido.
+A skill for Claude that writes and rewrites text so it sounds like a person wrote it. It works in English, Portuguese and Spanish, and it runs anywhere that reads a `SKILL.md`: Claude Code, Claude.ai, or another agent you point at the file.
 
-Junta duas skills conhecidas, o [humanizer](https://github.com/blader/humanizer) e o [no-ai-slop](https://github.com/realrossmanngroup/no_ai_slop_writing_rules), e acrescenta o que faltava nelas: filtros pros vícios de IA em português brasileiro, um perfil de voz pessoal e um script que acha os vícios automaticamente.
+You give it a draft, or ask it to write something, and it strips out the habits that make text read as generated: the "it's not X, it's Y" contrasts, the punchline after every paragraph, dashes everywhere, "delve" and "leverage", "Great question!", bold labels on every bullet. It won't invent facts to fill the gaps. If a sentence needs a number it doesn't have, it asks.
 
-## O que ela faz
+## What's inside
 
-Você manda um texto (ou pede pra ela escrever um) e ela:
+```
+SKILL.md                           the process and the 38 filters
+references/filters-en.md           English word and phrase lists, with plain replacements
+references/filters-pt-br.md        same for Brazilian Portuguese
+references/filters-es.md           same for Spanish
+references/natural-voice-filter.md voice profile to imitate, per channel
+scripts/check_ai_tells.py          automatic checker, no dependencies
+```
 
-1. descobre o canal e o leitor (WhatsApp, e-mail, post, README, commit);
-2. marca os vícios de IA com 32 filtros, do mais forte pro mais fraco;
-3. roda o `slop_check.py` quando tem terminal;
-4. reescreve sem inventar fato, número, nome ou citação;
-5. confere de novo os vícios que mais sobrevivem e entrega a versão final.
+The filters come in seven groups:
 
-Os filtros cobrem:
-
-| Grupo | Exemplos |
+| Group | Examples |
 |---|---|
-| Encenação | "não é X, é Y", fecho de efeito ("E isso muda tudo."), "a verdade é que", pergunta-isca ("Você já parou pra pensar?"), discutir com objeção que ninguém fez |
-| Ritmo de fábrica | trio forçado, frases e parágrafos do mesmo tamanho, travessão, ressalva empilhada, "além disso / nesse sentido / vale ressaltar", gerundismo |
-| Inflação | mergulhar, alavancar, potencializar, robusto, crucial, jornada, cenário, intensificador sem número, "papel fundamental", linguagem de folder, "especialistas afirmam" sem fonte, "conta com" no lugar de "tem" |
-| Formatação | negrito de enfeite, lista com **Rótulo:**, Título Em Title Case, emoji em título, aspas curvas, exclamação em tudo |
-| Sobras de chat | "Ótima pergunta!", "Espero ter ajudado", "Quer que eu...?", "até a data do meu treinamento", `oaicite`, `turn0search0`, caractere invisível, `[Nome]` esquecido |
-| Leitor errado | reexplicar o que a pessoa já sabe, resposta na última linha, registro errado pro canal |
+| Staging | "not X, but Y", punchline closers, "here's the thing", bait questions, arguing with an objection nobody made |
+| Rhythm | forced triads, same-length sentences and paragraphs, dashes, stacked hedges, "furthermore / moreover / it's worth noting" |
+| Inflation | AI vocabulary, intensifiers with no number behind them, "plays a pivotal role", brochure language, "experts say" with no source |
+| Formatting | decorative bold, **Label:** bullets, Title Case Headings, emoji in headings, curly quotes, exclamation marks everywhere |
+| Leftovers | "I hope this helps", "Want me to...?", knowledge-cutoff disclaimers, `oaicite`, `turn0search0`, zero-width characters, `[Name]` placeholders |
+| Wrong reader | re-explaining what the reader already knows, the answer buried in the last line, the wrong register for the channel |
+| Overcorrection | cutting real warmth, flattening the genre, fake-casual punctuation, restating numbers, evenly balanced shapes, planted details |
 
-## Instalação
+Each language file has its own local habits, like "vale ressaltar" and "vou estar enviando" in Portuguese or "cabe destacar" in Spanish.
 
-Claude Code, pra todos os projetos:
+The overcorrection group is there because rewrites that only delete things come out cold and suspiciously tidy, which gives them away too. It checks that real courtesy survived, that the genre still sounds like itself (a bakery's birthday post can have an exclamation mark) and that a WhatsApp message wasn't polished into perfect punctuation.
+
+## Install
+
+Claude Code, for every project:
 
 ```bash
 git clone https://github.com/thalleshavelar-sudo/talk-as-human.git ~/.claude/skills/talk-as-human
 ```
 
-Só num projeto:
+One project only:
 
 ```bash
 git clone https://github.com/thalleshavelar-sudo/talk-as-human.git .claude/skills/talk-as-human
 ```
 
-Claude.ai: compacte a pasta em `.zip` e envie na área de Skills das configurações.
+Claude.ai: zip the folder and upload it in the Skills section of your settings.
 
-Outros agentes (Cursor, Codex, etc.): aponte o arquivo de regras deles pro `SKILL.md`.
+Other agents (Cursor, Codex and so on): point their rules file at `SKILL.md`.
 
-## Uso
+## Use
 
 ```
-/talk-as-human reescreve isso: <texto>
+/talk-as-human rewrite this: <text>
 ```
 
-Ou só peça: "humaniza esse texto", "tira a cara de IA", "escreve essa mensagem do meu jeito". Se mandar uma amostra do seu texto junto, ela segue a amostra.
+Or just ask: "make this sound natural", "humaniza esse texto", "que no suene a IA". If you paste a sample of your own writing, it follows the sample over its own defaults, dashes included.
 
-O checador roda sozinho, sem dependência:
+The checker also works by itself:
 
 ```bash
-python3 scripts/slop_check.py rascunho.md
-echo "Ótima pergunta! Vale ressaltar que..." | python3 scripts/slop_check.py -
-python3 scripts/slop_check.py --strict --min 3 post.txt   # código 1 se achar algo forte, bom pra CI
+python3 scripts/check_ai_tells.py draft.md
+echo "Great question! It's worth noting that..." | python3 scripts/check_ai_tells.py -
+python3 scripts/check_ai_tells.py --strict --min 3 post.txt   # exits 1 on strong findings, handy in CI
 ```
 
-Saída de exemplo:
+Sample output:
 
 ```
-[FORTE]     L3  contraste encenado (não é X, é Y): Não é só um app, é
-[FORTE]     L3  resíduo de chat: Ótima pergunta
-[FORTE]     L3  travessão: '—'
-[médio]     L3  conectivo de redação: Vale ressaltar
-[médio]     L3  palavra de IA: robusta
+[STRONG]    L1  chat residue: ¡Excelente pregunta
+[STRONG]    L1  staged contrast (not X, but Y): No es solo una herramienta, es
+[STRONG]    L1  dash: '—'
+[medium]    L1  inflation / brochure language: juega un papel fundamental
+[medium]    L1  essay connector / filler opener: Cabe destacar
 ```
 
-O script acha palavra e forma. Encenação, fato inventado e leitor errado continuam sendo trabalho de leitura, e é isso que o `SKILL.md` ensina.
+The script catches words and shapes. It can't tell when a paragraph is staging a point or answering a question nobody asked; that's what `SKILL.md` is for.
 
-## Estrutura
+One limit worth knowing: the skill won't invent details, so a draft with only generic facts comes back clean but a bit thin. Give it the messy specific (what actually broke, which cake, why the meeting moved) and the result reads much more like you.
 
-```
-SKILL.md                     regras, filtros e processo
-references/filtros-pt-br.md  listas de palavras e expressões em português, com troca
-references/filters-en.md     o mesmo em inglês
-references/voz-thalles.md    perfil de voz do Thalles por canal (casual, profissional, público)
-scripts/slop_check.py        checador automático
-```
+## Teach it your voice
 
-## Ensinando sua voz
+`references/natural-voice-filter.md` ships with the author's own voice: casual Brazilian Portuguese, requests chained with "e", "pra" and "n", no emoji, no exclamation marks. Swap in your own messages, a few per channel (chat, email, public post), and say where each one came from. With only two or three samples it gets the vocabulary right but still guesses at punctuation and rhythm.
 
-Abra `references/voz-thalles.md` e cole mensagens reais suas no fim, dizendo o canal de cada uma. Quanto mais amostra, melhor ela acerta. Se quiser usar a skill com a voz de outra pessoa, copie o arquivo e troque as amostras.
+## License
 
-## Créditos
-
-- [blader/humanizer](https://github.com/blader/humanizer), de Siqi Chen, licença MIT. Base dos filtros de encenação, ritmo, inflação e sobras de chat.
-- [Wikipedia: Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), do WikiProject AI Cleanup.
-- [realrossmanngroup/no_ai_slop_writing_rules](https://github.com/realrossmanngroup/no_ai_slop_writing_rules). Ideias de títulos dramáticos, palavras-escudo, artefatos de marcação, métricas de variação de frase e parágrafo. O texto aqui foi reescrito, não copiado.
-
-## Licença
-
-MIT. Veja [LICENSE](LICENSE) e [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

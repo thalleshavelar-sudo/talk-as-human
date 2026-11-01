@@ -1,6 +1,6 @@
-# Avisos de terceiros
+# Third-party notices
 
-Partes do SKILL.md são traduzidas e adaptadas de blader/humanizer (https://github.com/blader/humanizer), sob a licença abaixo.
+Parts of the filter taxonomy in SKILL.md are adapted from an MIT-licensed project. Its license requires this notice to travel with the code:
 
 ```
 MIT License
